@@ -1,11 +1,14 @@
 PartialScreenshots
 =====================
 
-An app to take a partial screenshoton Android.
+An app to take a partial screenshot on Android.
 
 
 ## Minimum Operating System: 
 - Android 5.0 : MediaProjection API
+
+## How to use
+![image](https://github.com/murmurmuk/PartialScreenshots/blob/master/output.gif)
 
 
 ## Based on
