@@ -7,9 +7,7 @@ import android.graphics.Paint;
 import android.util.AttributeSet;
 import android.view.View;
 
-/**
- * Created by murmurmuk on 2017/6/20.
- */
+
 
 public class ClipView extends View {
     private float x1, y1, x2, y2;

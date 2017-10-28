@@ -11,14 +11,10 @@ import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaScannerConnection;
-import android.media.projection.MediaProjection;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
@@ -29,23 +25,36 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Toast;
 
+import org.reactivestreams.Publisher;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
+import java.util.Locale;
 
+import io.reactivex.BackpressureStrategy;
+import io.reactivex.Flowable;
+import io.reactivex.FlowableEmitter;
+import io.reactivex.FlowableOnSubscribe;
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.annotations.NonNull;
+import io.reactivex.functions.Action;
+import io.reactivex.functions.BiFunction;
+import io.reactivex.functions.Function;
+import io.reactivex.schedulers.Schedulers;
 import murmur.partialscreenshots.databinding.BubbleLayoutBinding;
 import murmur.partialscreenshots.databinding.ClipLayoutBinding;
 import murmur.partialscreenshots.databinding.TrashLayoutBinding;
 
+import static android.os.Environment.DIRECTORY_PICTURES;
 import static android.widget.Toast.LENGTH_LONG;
 import static murmur.partialscreenshots.MainActivity.sMediaProjection;
 
-/**
- * Created by murmurmuk on 2017/6/20.
- */
 
 public class BubbleService extends Service {
 
@@ -61,111 +70,12 @@ public class BubbleService extends Service {
     private BubbleHandler mBubbleHandler;
     private boolean isClipMode;
 
-    private String FILEHEAD;
-    private String mFileName;
-    private String STORE_DIRECTORY;
     private ImageReader mImageReader;
     private VirtualDisplay mVirtualDisplay;
-    private Point mSize;
-    private ImageAvailableListener mImageAvailableListener;
-    private boolean IMAGES_PRODUCED;
-    private MediaScannerConnection mediaScannerConnection;
-    private HandlerThread mHandlerThread;
-    private Handler mHandler;
-    private MediaProjectionStopCallback mMediaProjectionStopCallback;
-
+    private MediaScannerConnection.OnScanCompletedListener mScanListener;
+    private ImageReader.OnImageAvailableListener mImageListener;
     private int mX, mY, mW, mH;
 
-    private class ImageAvailableListener implements ImageReader.OnImageAvailableListener {
-        @Override
-        public void onImageAvailable(ImageReader reader) {
-            Image image = null;
-            FileOutputStream fos = null;
-            Bitmap bitmap = null;
-            Bitmap bitmapCut = null;
-
-            try {
-                image = reader.acquireLatestImage();
-                if (image != null && !IMAGES_PRODUCED) {
-                    Image.Plane[] planes = image.getPlanes();
-                    ByteBuffer buffer = planes[0].getBuffer();
-                    int pixelStride = planes[0].getPixelStride();
-                    int rowStride = planes[0].getRowStride();
-                    int rowPadding = rowStride - pixelStride * mSize.x;
-
-                    // create bitmap
-                    bitmap = Bitmap.createBitmap(mSize.x + rowPadding / pixelStride, mSize.y, Bitmap.Config.ARGB_8888);
-                    bitmap.copyPixelsFromBuffer(buffer);
-                    bitmapCut = Bitmap.createBitmap(bitmap, mX, mY, mW, mH);//x,y,w,h
-                    int count = 0;
-                    mFileName = STORE_DIRECTORY + FILEHEAD + count + ".png";
-                    File storeFile = new File(mFileName);
-                    while (storeFile.exists()) {
-                        count++;
-                        mFileName = STORE_DIRECTORY + FILEHEAD + count + ".png";
-                        storeFile = new File(mFileName);
-                    }
-                    // write bitmap to a file
-                    fos = new FileOutputStream(mFileName);
-                    bitmapCut.compress(Bitmap.CompressFormat.PNG, 100, fos);
-
-                    IMAGES_PRODUCED = true;
-                    Log.e("kanna", "captured image: " + mFileName +  " w " + mSize.x + " h " + mSize.y);
-                }
-
-            } catch (Exception e) {
-                e.printStackTrace();
-                Log.e("kanna", "captured image: error " +  e.toString());
-                Toast.makeText(mContext,"error occur: " +e.toString(), Toast.LENGTH_SHORT).show();
-            } finally {
-                if (fos != null) {
-                    try {
-                        fos.close();
-                    } catch (IOException ioe) {
-                        ioe.printStackTrace();
-                    }
-                }
-
-                if (bitmap != null) {
-                    bitmap.recycle();
-                }
-
-                if(bitmapCut != null){
-                    bitmapCut.recycle();
-
-                }
-
-                if (image != null) {
-                    image.close();
-                }
-                if(IMAGES_PRODUCED){
-                    Log.d("kanna","done task");
-                }
-                else{
-                    Log.d("kanna","task fail");
-                }
-                stopProjection();
-            }
-        }
-    }
-    private void stopProjection() {
-        mHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (sMediaProjection != null) {
-                    //sMediaProjection.stop();
-                    if (mVirtualDisplay != null) mVirtualDisplay.release();
-                    if (mImageReader != null) mImageReader.setOnImageAvailableListener(null, null);
-                    if (mImageAvailableListener != null) mImageAvailableListener = null;
-                    sMediaProjection.unregisterCallback(mMediaProjectionStopCallback);
-                    if(IMAGES_PRODUCED) {
-                        Log.d("kanna","update entry");
-                        updateEntry();
-                    }
-                }
-            }
-        });
-    }
 
 
 
@@ -178,15 +88,13 @@ public class BubbleService extends Service {
     public void onCreate() {
         super.onCreate();
         mContext = this;
-        mHandlerThread = new HandlerThread("bubblethread");
-        mHandlerThread.start();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d("kanna","onstart");
+        Log.d("kanna","onStart");
         if(sMediaProjection != null){
-            Log.d("kanna","mediaprojtction alive");
+            Log.d("kanna","mediaProjection alive");
         }
         initial();
         return super.onStartCommand(intent, flags, startId);
@@ -227,12 +135,6 @@ public class BubbleService extends Service {
             sMediaProjection.stop();
             sMediaProjection = null;
         }
-        if(mHandler != null){
-            mHandler = null;
-        }
-        if(mHandlerThread != null){
-            mHandlerThread.quit();
-        }
         super.onDestroy();
     }
 
@@ -258,14 +160,6 @@ public class BubbleService extends Service {
         getWindowManager().addView(mBubbleLayoutBinding.getRoot(), mBubbleLayoutParams);
 
         isClipMode = false;
-
-        mSize = new Point();
-        // start capture handling thread
-        mHandler = new Handler(mHandlerThread.getLooper());
-        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd");
-        Calendar c = Calendar.getInstance();
-        FILEHEAD = simpleDateFormat.format(c.getTime()) + "_";
-        Log.d("kanna", FILEHEAD);
     }
 
     private WindowManager getWindowManager() {
@@ -274,6 +168,7 @@ public class BubbleService extends Service {
         }
         return mWindowManager;
     }
+
     private WindowManager.LayoutParams buildLayoutParamsForBubble(int x, int y) {
         WindowManager.LayoutParams params;
         if (Build.VERSION.SDK_INT >= 26) {
@@ -285,6 +180,7 @@ public class BubbleService extends Service {
                     PixelFormat.TRANSPARENT);
         }
         else if(Build.VERSION.SDK_INT >= 23){
+            //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.WRAP_CONTENT,
@@ -293,6 +189,7 @@ public class BubbleService extends Service {
                     PixelFormat.TRANSPARENT);
         }
         else{
+            //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.WRAP_CONTENT,
@@ -317,6 +214,7 @@ public class BubbleService extends Service {
                     PixelFormat.TRANSPARENT);
         }
         else if(Build.VERSION.SDK_INT >= 23){
+            //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -325,6 +223,7 @@ public class BubbleService extends Service {
                     PixelFormat.TRANSPARENT);
         }
         else{
+            //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -345,12 +244,12 @@ public class BubbleService extends Service {
         int location[] = new int[2];
         int trashLeft, trashRight, trashTop, trashBottom;
         float x, y;
-        View trashview= mTrashLayoutBinding.getRoot();
-        trashview.getLocationOnScreen(location);
+        View trashView= mTrashLayoutBinding.getRoot();
+        trashView.getLocationOnScreen(location);
         trashLeft = location[0];
-        trashRight = trashLeft + trashview.getWidth();
+        trashRight = trashLeft + trashView.getWidth();
         trashTop = location[1];
-        trashBottom = trashTop + trashview.getHeight();
+        trashBottom = trashTop + trashView.getHeight();
         x = motionEvent.getRawX();
         y = motionEvent.getRawY();
         Log.d("kanna",trashLeft + " " + trashRight + " " + trashTop + " " + trashBottom + " " + x + " " +y);
@@ -359,7 +258,7 @@ public class BubbleService extends Service {
             stopSelf();
         }
         else{
-            trashview.setVisibility(View.GONE);
+            trashView.setVisibility(View.GONE);
         }
     }
 
@@ -417,102 +316,213 @@ public class BubbleService extends Service {
         Log.d("kanna","clip " + mX + " " + mY + " " + mW + " " + mH);
     }
 
-    //https://stackoverflow.com/questions/14341041/how-to-get-real-screen-height-and-width`
-    private void createVirtualDisplay(){
-        // display metrics
-        DisplayMetrics metrics = getResources().getDisplayMetrics();
-        Display display = getWindowManager().getDefaultDisplay();
-        display.getRealSize(mSize);
-        mImageReader = ImageReader.newInstance(mSize.x, mSize.y, PixelFormat.RGBA_8888, 2);
-        String VDNAME = "capturer";
-        mVirtualDisplay = sMediaProjection.createVirtualDisplay(VDNAME, mSize.x, mSize.y, metrics.densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, mImageReader.getSurface(), null, mHandler);
-        IMAGES_PRODUCED = false;
-        mImageAvailableListener = new ImageAvailableListener();
-        // create virtual display depending on device width / height
-        mImageReader.setOnImageAvailableListener(mImageAvailableListener, null);
+    private Bitmap createBitmap(Image image){
+        Log.d("kanna", "check create bitmap: " + Thread.currentThread().toString());
+        Bitmap bitmap, bitmapCut;
+        Image.Plane[] planes = image.getPlanes();
+        ByteBuffer buffer = planes[0].getBuffer();
+        int pixelStride = planes[0].getPixelStride();
+        int rowStride = planes[0].getRowStride();
+        int rowPadding = rowStride - pixelStride * image.getWidth();
+        // create bitmap
+        bitmap = Bitmap.createBitmap(image.getWidth() + rowPadding / pixelStride,
+                image.getHeight(), Bitmap.Config.ARGB_8888);
+        bitmap.copyPixelsFromBuffer(buffer);
+        bitmapCut = Bitmap.createBitmap(bitmap, mX, mY, mW, mH);
+        bitmap.recycle();
+        image.close();
+        return bitmapCut;
     }
 
-    private class MediaProjectionStopCallback extends MediaProjection.Callback {
-        @Override
-        public void onStop() {
-            Log.e("ScreenCapture", "stopping projection.");
-            mHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    if (mVirtualDisplay != null) mVirtualDisplay.release();
-                    if (mImageReader != null) mImageReader.setOnImageAvailableListener(null, null);
-                    if (mImageAvailableListener != null) mImageAvailableListener = null;
-                    sMediaProjection.unregisterCallback(mMediaProjectionStopCallback);
+    //https://stackoverflow.com/questions/14341041/how-to-get-real-screen-height-and-width
+    private Flowable<Image> getScreenShot(){
+        final Point screenSize = new Point();
+        final DisplayMetrics metrics = getResources().getDisplayMetrics();
+        Display display = getWindowManager().getDefaultDisplay();
+        display.getRealSize(screenSize);
+        return Flowable.create(new FlowableOnSubscribe<Image>() {
+            @Override
+            public void subscribe(@NonNull final FlowableEmitter<Image> emitter) throws Exception {
+                mImageReader = ImageReader.newInstance(screenSize.x, screenSize.y, PixelFormat.RGBA_8888, 2);
+                mVirtualDisplay = sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
+                        metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        mImageReader.getSurface(), null, null);
+                mImageListener = new ImageReader.OnImageAvailableListener() {
+                    Image image = null;
+                    @Override
+                    public void onImageAvailable(ImageReader imageReader) {
+                        try {
+                            image = imageReader.acquireLatestImage();
+                            Log.d("kanna", "check reader: " + Thread.currentThread().toString());
+                            if (image != null) {
+                                emitter.onNext(image);
+                                emitter.onComplete();
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                            emitter.onError(new Throwable("ImageReader error"));
+                        }
+                        mImageReader.setOnImageAvailableListener(null, null);
+                    }
+
+                };
+                mImageReader.setOnImageAvailableListener(mImageListener, null);
+
+            }
+        }, BackpressureStrategy.DROP);
+    }
+    private Flowable<String> createFile(){
+        return Flowable.create(new FlowableOnSubscribe<String>() {
+            @Override
+            public void subscribe(@NonNull FlowableEmitter<String> emitter) throws Exception {
+                Log.d("kanna", "check create filename: " + Thread.currentThread().toString());
+                String directory, fileHead, fileName;
+                int count = 0;
+                File externalFilesDir = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES);
+                if (externalFilesDir != null) {
+                    directory = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES)
+                            .getAbsolutePath() + "/screenshots/";
+
+                    Log.d("kanna", directory);
+                    File storeDirectory = new File(directory);
+                    if (!storeDirectory.exists()) {
+                        boolean success = storeDirectory.mkdirs();
+                        if (!success) {
+                            emitter.onError(new Throwable("failed to create file storage directory."));
+                            return;
+                        }
+                    }
+                } else {
+                    emitter.onError(new Throwable("failed to create file storage directory," +
+                            " getExternalFilesDir is null."));
+                    return;
                 }
-            });
+
+                SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH);
+                Calendar c = Calendar.getInstance();
+                fileHead = simpleDateFormat.format(c.getTime()) + "_";
+                fileName = directory + fileHead + count + ".png";
+                File storeFile = new File(fileName);
+                while (storeFile.exists()) {
+                    count++;
+                    fileName = directory + fileHead + count + ".png";
+                    storeFile = new File(fileName);
+                }
+                emitter.onNext(fileName);
+                emitter.onComplete();
+            }
+        },BackpressureStrategy.DROP).subscribeOn(Schedulers.io());
+    }
+    private void writeFile(Bitmap bitmap, String fileName) throws IOException{
+        Log.d("kanna", "check write file: " + Thread.currentThread().toString());
+        FileOutputStream fos = new FileOutputStream(fileName);
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+        fos.close();
+        bitmap.recycle();
+    }
+    private Flowable<String> updateScan(final String fileName){
+        return Flowable.create(new FlowableOnSubscribe<String>() {
+            @Override
+            public void subscribe(@NonNull final FlowableEmitter<String> emitter) throws Exception {
+                String[] path = new String[]{fileName};
+                mScanListener = new MediaScannerConnection.OnScanCompletedListener() {
+                    @Override
+                    public void onScanCompleted(String s, Uri uri) {
+                        Log.d("kanna", "check scan file: " + Thread.currentThread().toString());
+                        if (uri == null) {
+                            emitter.onError(new Throwable("Scan fail" + s));
+                        }
+                        else {
+                            emitter.onNext(s);
+                            emitter.onComplete();
+                        }
+                    }
+                };
+                MediaScannerConnection.scanFile(mContext, path, null, mScanListener);
+            }
+        },BackpressureStrategy.DROP);
+    }
+    private void finalRelease(){
+        if (mVirtualDisplay != null){
+            mVirtualDisplay.release();
         }
+        if (mImageReader != null){
+            mImageReader = null;
+        }
+        if(mImageListener != null){
+            mImageListener = null;
+        }
+        if(mScanListener != null){
+            mScanListener = null;
+        }
+    }
+
+    /*
+    RXJava
+     */
+    private void shotScreen(){
+        getScreenShot()
+                .subscribeOn(AndroidSchedulers.mainThread())
+                .observeOn(Schedulers.io())
+                .map(new Function<Image, Bitmap>() {
+                    @Override
+                    public Bitmap apply(@NonNull Image image) throws Exception {
+                        return createBitmap(image);
+                    }
+                })
+                .zipWith(createFile(), new BiFunction<Bitmap, String, String>() {
+                    @Override
+                    public String apply(@NonNull Bitmap bitmap, @NonNull String fileName) throws Exception {
+                        writeFile(bitmap, fileName);
+                        return fileName;
+                    }
+                })
+                .flatMap(new Function<String, Publisher<String>>() {
+                    @Override
+                    public Publisher<String> apply(@NonNull String fileName) throws Exception {
+                        return updateScan(fileName);
+                    }
+                })
+                .observeOn(Schedulers.io())
+                .doFinally(new Action() {
+                    @Override
+                    public void run() throws Exception {
+                        Log.d("kanna", "check do finally: " + Thread.currentThread().toString());
+                        finalRelease();
+                    }
+                })
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(new Subscriber<String>() {
+
+                    @Override
+                    public void onSubscribe(Subscription s) {
+                        s.request(Long.MAX_VALUE);
+                    }
+
+                    @Override
+                    public void onNext(String filename) {
+                        Log.d("kanna", "onNext: " + filename);
+                        Toast.makeText(mContext, "Create file: " + filename, LENGTH_LONG).show();
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        Log.w("kanna", "onError: ", t);
+                        Toast.makeText(mContext, "Error occur: " + t, LENGTH_LONG).show();
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        Log.d("kanna", "onComplete");
+                    }
+                });
     }
 
     private void screenshot(){
         if (sMediaProjection != null) {
-            File externalFilesDir = getExternalFilesDir(null);
-            if (externalFilesDir != null) {
-                STORE_DIRECTORY = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).getAbsolutePath() + "/screenshots/";
-
-                Log.d("kanna", STORE_DIRECTORY);
-                File storeDirectory = new File(STORE_DIRECTORY);
-                if (!storeDirectory.exists()) {
-                    boolean success = storeDirectory.mkdirs();
-                    if (!success) {
-                        Log.e("kanna", "failed to create file storage directory.");
-                        return;
-                    }
-                }
-            } else {
-                Log.e("kanna", "failed to create file storage directory, getExternalFilesDir is null.");
-                return;
-            }
-
-
-            createVirtualDisplay();
-            mMediaProjectionStopCallback = new MediaProjectionStopCallback();
-            sMediaProjection.registerCallback(mMediaProjectionStopCallback, mHandler);
+            shotScreen();
         }
     }
-
-    private void updateEntry(){
-        if(mediaScannerConnection == null) {
-            mediaScannerConnection = new MediaScannerConnection(this, new MediaScannerConnection.MediaScannerConnectionClient() {
-                @Override
-                public void onMediaScannerConnected() {
-                    Log.d("kanna", "connected");
-                    scan();
-                }
-
-                @Override
-                public void onScanCompleted(String path, Uri uri) {
-                    if (uri == null)
-                        Log.d("kanna", "completed with fail " + path);
-                    else {
-                        Log.d("kanna", "completed " + uri.toString());
-                        taskComplete();
-                    }
-                    mediaScannerConnection.disconnect();
-                    mediaScannerConnection = null;
-                }
-            });
-            mediaScannerConnection.connect();
-        }
-    }
-    private void scan(){
-        String tmp = mFileName;
-        mediaScannerConnection.scanFile(tmp, null);
-    }
-    private void taskComplete(){
-        mHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(mContext, "create file: "+mFileName, LENGTH_LONG).show();
-            }
-        });
-    }
-
 
 }
 

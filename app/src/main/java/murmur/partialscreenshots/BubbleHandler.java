@@ -5,9 +5,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 
-/**
- * Created by murmurmuk on 2017/6/20.
- */
 
 public class BubbleHandler {
     public View.OnTouchListener mBubbleTouchListener;
@@ -15,13 +12,13 @@ public class BubbleHandler {
 
     private final BubbleService mBubbleService;
 
-    public BubbleHandler(BubbleService service){
+    BubbleHandler(BubbleService service){
         mBubbleService = service;
-        setmBubbleTouchListener();
-        setmClipViewTouchListener();
+        setBubbleTouchListener();
+        setClipViewTouchListener();
     }
 
-    private void setmBubbleTouchListener(){
+    private void setBubbleTouchListener(){
         mBubbleTouchListener = new View.OnTouchListener(){
             private int initialX;
             private int initialY;
@@ -81,7 +78,7 @@ public class BubbleHandler {
     }
 
 
-    private void setmClipViewTouchListener(){
+    private void setClipViewTouchListener(){
         mClipViewTouchListener = new View.OnTouchListener() {
             private float x1, y1, x2, y2;
             private float rx1, ry1, rx2, ry2;
@@ -102,10 +99,7 @@ public class BubbleHandler {
                         updateCustomView((ClipView) v, x1, y1, x2, y2);
                         break;
                     case MotionEvent.ACTION_UP:
-                        //x1 = x2 = y1 = y2 = 0;
-                        //updateCustomView((ClipView) v, x1, y1, x2, y2);
                         mBubbleService.stopClipMode(rx1, ry1, rx2, ry2);
-                        //mBubbleService.stopClipMode(x1, y1, x2, y2);
                         break;
                 }
                 Log.d("kanna",x1 +" "+ y1 + " " + x2 + " " + y2);
