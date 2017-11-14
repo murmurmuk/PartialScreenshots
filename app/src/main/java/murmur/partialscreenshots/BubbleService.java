@@ -288,12 +288,11 @@ public class BubbleService extends Service {
         isClipMode = false;
         if(mH < 50 || mW < 50){
             Toast.makeText(mContext,"Region is too small.", Toast.LENGTH_SHORT).show();
+            mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
         }
         else{
             screenshot();
         }
-        mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
-
     }
 
     private void updateClipBox(float inX1, float inY1, float inX2, float inY2){
@@ -483,15 +482,15 @@ public class BubbleService extends Service {
                         return updateScan(fileName);
                     }
                 })
-                .observeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
                 .doFinally(new Action() {
                     @Override
                     public void run() throws Exception {
                         Log.d("kanna", "check do finally: " + Thread.currentThread().toString());
+                        mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
                         finalRelease();
                     }
                 })
-                .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(new Subscriber<String>() {
 
                     @Override
