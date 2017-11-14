@@ -38,6 +38,7 @@ public class BubbleHandler {
                         initialTouchY = motionEvent.getRawY();
                         break;
                     case MotionEvent.ACTION_UP:
+                        view.performClick();
                         if(isMove) {
                             mBubbleService.checkRegion(motionEvent);
                             isMove = false;
@@ -57,7 +58,6 @@ public class BubbleHandler {
                         mBubbleService.updateViewLayout(view, params);
                         break;
                 }
-
                 return true;
             }
         };
@@ -83,7 +83,7 @@ public class BubbleHandler {
             private float x1, y1, x2, y2;
             private float rx1, ry1, rx2, ry2;
             @Override
-            public boolean onTouch(View v, MotionEvent event) {
+            public boolean onTouch(View view, MotionEvent event) {
                 switch(event.getAction()){
                     case MotionEvent.ACTION_DOWN:
                         x1 = x2 = event.getX();
@@ -96,9 +96,10 @@ public class BubbleHandler {
                         rx2 = event.getRawX();
                         y2 = event.getY();
                         ry2 = event.getRawY();
-                        updateCustomView((ClipView) v, x1, y1, x2, y2);
+                        updateCustomView((ClipView) view, x1, y1, x2, y2);
                         break;
                     case MotionEvent.ACTION_UP:
+                        view.performClick();
                         mBubbleService.stopClipMode(rx1, ry1, rx2, ry2);
                         break;
                 }
