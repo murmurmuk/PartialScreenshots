@@ -210,7 +210,8 @@ public class BubbleService extends Service {
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                     PixelFormat.TRANSPARENT);
         }
         else if(Build.VERSION.SDK_INT >= 23){
@@ -219,7 +220,8 @@ public class BubbleService extends Service {
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                     PixelFormat.TRANSPARENT);
         }
         else{
@@ -228,7 +230,9 @@ public class BubbleService extends Service {
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.TYPE_TOAST,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                            WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION,
                     PixelFormat.TRANSPARENT);
         }
         return params;
@@ -506,7 +510,7 @@ public class BubbleService extends Service {
 
                     @Override
                     public void onError(Throwable t) {
-                        Log.w("kanna", "onError: ", t);
+                        Log.d("kanna", "onError: ", t);
                         Toast.makeText(mContext, "Error occur: " + t, LENGTH_LONG).show();
                     }
 
