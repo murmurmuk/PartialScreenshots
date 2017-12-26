@@ -103,7 +103,7 @@ public class BubbleHandler {
                         mBubbleService.stopClipMode(rx1, ry1, rx2, ry2);
                         break;
                 }
-                Log.d("kanna",x1 +" "+ y1 + " " + x2 + " " + y2);
+                //Log.d("kanna",x1 +" "+ y1 + " " + x2 + " " + y2);
                 return true;
             }
         };

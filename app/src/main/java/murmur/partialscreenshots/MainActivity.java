@@ -76,7 +76,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean checkDrawOverlayPermission() {
         if (Build.VERSION.SDK_INT >= 23) {
             if (!Settings.canDrawOverlays(this)) {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName()));
                 startActivity(intent);
                 return false;
             }
@@ -122,7 +123,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startBubble(){
-        Log.d("kanna","start buubble");
+        Log.d("kanna","start bubble");
         binding.test.setVisibility(View.GONE);
         Intent intent = new Intent(this, BubbleService.class);
         stopService(intent);

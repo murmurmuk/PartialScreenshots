@@ -524,6 +524,9 @@ public class BubbleService extends Service {
     private void screenshot(){
         if (sMediaProjection != null) {
             shotScreen();
+        } else {
+            Toast.makeText(mContext, "No MediaProjection, stop bubble.", LENGTH_LONG).show();
+            stopSelf();
         }
     }
 
