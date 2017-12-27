@@ -3,6 +3,7 @@ package murmur.partialscreenshots;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
@@ -55,10 +56,7 @@ import static android.os.Environment.DIRECTORY_PICTURES;
 import static android.widget.Toast.LENGTH_LONG;
 import static murmur.partialscreenshots.MainActivity.sMediaProjection;
 
-
 public class BubbleService extends Service {
-
-
     private WindowManager mWindowManager;
     private Context mContext;
     private BubbleLayoutBinding mBubbleLayoutBinding;
@@ -69,15 +67,11 @@ public class BubbleService extends Service {
     private WindowManager.LayoutParams mClipLayoutParams;
     private BubbleHandler mBubbleHandler;
     private boolean isClipMode;
-
     private ImageReader mImageReader;
     private VirtualDisplay mVirtualDisplay;
     private MediaScannerConnection.OnScanCompletedListener mScanListener;
     private ImageReader.OnImageAvailableListener mImageListener;
     private int mX, mY, mW, mH;
-
-
-
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -101,48 +95,47 @@ public class BubbleService extends Service {
     }
 
     @Override
-    public void onDestroy(){
-        if(mWindowManager != null) {
-            if(mBubbleLayoutBinding != null){
+    public void onDestroy() {
+        if (mWindowManager != null) {
+            if (mBubbleLayoutBinding != null) {
                 mWindowManager.removeView(mBubbleLayoutBinding.getRoot());
                 mBubbleLayoutBinding = null;
-                if(mBubbleLayoutParams != null){
+                if (mBubbleLayoutParams != null) {
                     mBubbleLayoutParams = null;
                 }
             }
-
-            if(mTrashLayoutBinding != null){
+            if (mTrashLayoutBinding != null) {
                 mWindowManager.removeView(mTrashLayoutBinding.getRoot());
                 mTrashLayoutBinding = null;
-                if(mTrashLayoutParams != null){
+                if (mTrashLayoutParams != null) {
                     mTrashLayoutParams = null;
                 }
             }
-            if(mClipLayoutBinding != null){
-                if(isClipMode) {
+            if (mClipLayoutBinding != null) {
+                if (isClipMode) {
                     mWindowManager.removeView(mClipLayoutBinding.getRoot());
                     isClipMode = false;
                 }
                 mClipLayoutBinding = null;
-                if(mClipLayoutParams != null){
+                if (mClipLayoutParams != null) {
                     mClipLayoutParams = null;
                 }
             }
             mWindowManager = null;
             mBubbleHandler = null;
         }
-        if(sMediaProjection != null){
+        if (sMediaProjection != null) {
             sMediaProjection.stop();
             sMediaProjection = null;
         }
         super.onDestroy();
     }
 
-    private void initial(){
+    private void initial() {
         Log.d("kanna","initial");
         LayoutInflater layoutInflater = LayoutInflater.from(mContext);
         mTrashLayoutBinding = TrashLayoutBinding.inflate(layoutInflater);
-        if(mTrashLayoutParams == null) {
+        if (mTrashLayoutParams == null) {
             mTrashLayoutParams = buildLayoutParamsForBubble(0, 0);
             mTrashLayoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         }
@@ -153,7 +146,7 @@ public class BubbleService extends Service {
 
 
         mBubbleLayoutBinding = BubbleLayoutBinding.inflate(layoutInflater);
-        if(mBubbleLayoutParams == null) {
+        if (mBubbleLayoutParams == null) {
             mBubbleLayoutParams = buildLayoutParamsForBubble(60, 60);
         }
         mBubbleLayoutBinding.setHandler(mBubbleHandler);
@@ -178,8 +171,7 @@ public class BubbleService extends Service {
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                     PixelFormat.TRANSPARENT);
-        }
-        else if(Build.VERSION.SDK_INT >= 23){
+        } else if(Build.VERSION.SDK_INT >= 23) {
             //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
@@ -187,8 +179,7 @@ public class BubbleService extends Service {
                     WindowManager.LayoutParams.TYPE_PHONE,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                     PixelFormat.TRANSPARENT);
-        }
-        else{
+        } else {
             //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
@@ -205,26 +196,7 @@ public class BubbleService extends Service {
 
     private WindowManager.LayoutParams buildLayoutParamsForClip() {
         WindowManager.LayoutParams params;
-        if (Build.VERSION.SDK_INT >= 26) {
-            params = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSPARENT);
-        }
-        else if(Build.VERSION.SDK_INT >= 23){
-            //noinspection deprecation
-            params = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSPARENT);
-        }
-        else{
+        if (Build.VERSION.SDK_INT <= 22) {
             //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -234,17 +206,64 @@ public class BubbleService extends Service {
                             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
                             WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION,
                     PixelFormat.TRANSPARENT);
+        } else {
+            Display display = getWindowManager().getDefaultDisplay();
+            /*
+            The real size may be smaller than the physical size of the screen
+            when the window manager is emulating a smaller display (using adb shell wm size).
+             */
+            Point sizeReal = new Point();
+            display.getRealSize(sizeReal);
+            /*
+            If requested from activity
+            (either using getWindowManager() or (WindowManager) getSystemService(Context.WINDOW_SERVICE))
+            resulting size will correspond to current app window size.
+            In this case it can be smaller than physical size in multi-window mode.
+             */
+            Point size = new Point();
+            display.getSize(size);
+            int screenWidth, screenHeight, diff;
+            if (size.x == sizeReal.x) {
+                diff = sizeReal.y - size.y;
+            } else {
+                diff = sizeReal.x - size.x;
+            }
+            screenWidth = sizeReal.x + diff;
+            screenHeight = sizeReal.y + diff;
+
+            Log.d("kanna", "get screen " + screenWidth + " " + screenHeight
+                    + " " + sizeReal.x + " " + size.x
+                    + " " + sizeReal.y + " " + size.y);
+            if (Build.VERSION.SDK_INT >= 26) {
+                params = new WindowManager.LayoutParams(
+                        screenWidth,
+                        screenHeight,
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        PixelFormat.TRANSPARENT);
+            } else {
+                //noinspection deprecation
+                params = new WindowManager.LayoutParams(
+                        screenWidth,
+                        screenHeight,
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        PixelFormat.TRANSPARENT);
+            }
+
         }
         return params;
     }
 
-    public void setmTrashVisible(){
-        if(mTrashLayoutBinding != null){
+    public void setTrashVisible() {
+        if (mTrashLayoutBinding != null) {
             mTrashLayoutBinding.getRoot().setVisibility(View.VISIBLE);
         }
     }
 
-    public void checkRegion(MotionEvent motionEvent){
+    public void checkRegion(MotionEvent motionEvent) {
         int location[] = new int[2];
         int trashLeft, trashRight, trashTop, trashBottom;
         float x, y;
@@ -257,28 +276,25 @@ public class BubbleService extends Service {
         x = motionEvent.getRawX();
         y = motionEvent.getRawY();
         Log.d("kanna",trashLeft + " " + trashRight + " " + trashTop + " " + trashBottom + " " + x + " " +y);
-        if( x >= trashLeft && x <= trashRight && y >= trashTop && y <= trashBottom){
+        if( x >= trashLeft && x <= trashRight && y >= trashTop && y <= trashBottom) {
             Log.d("kanna","stop self");
             stopSelf();
-        }
-        else{
+        } else {
             trashView.setVisibility(View.GONE);
         }
     }
 
-    public void updateViewLayout(View view, WindowManager.LayoutParams params){
+    public void updateViewLayout(View view, WindowManager.LayoutParams params) {
         getWindowManager().updateViewLayout(view, params);
     }
 
-    public void startClipMode(){
-        if(mClipLayoutBinding == null){
+    public void startClipMode() {
+        if (mClipLayoutBinding == null) {
             LayoutInflater layoutInflater = LayoutInflater.from(mContext);
             mClipLayoutBinding = ClipLayoutBinding.inflate(layoutInflater);
             mClipLayoutBinding.setHandler(mBubbleHandler);
         }
-        if(mClipLayoutParams == null){
-            mClipLayoutParams = buildLayoutParamsForClip();
-        }
+        mClipLayoutParams = buildLayoutParamsForClip();
         isClipMode = true;
         ((ClipView)mClipLayoutBinding.getRoot()).updateRegion(0, 0, 0, 0);
         mBubbleLayoutBinding.getRoot().setVisibility(View.GONE);
@@ -286,40 +302,37 @@ public class BubbleService extends Service {
         Toast.makeText(mContext,"Start clip mode.",Toast.LENGTH_SHORT).show();
     }
 
-    public void stopClipMode(float inX1, float inY1, float inX2, float inY2){
+    public void finishClipMode(float inX1, float inY1, float inX2, float inY2) {
         updateClipBox(inX1, inY1, inX2, inY2);
         getWindowManager().removeView(mClipLayoutBinding.getRoot());
         isClipMode = false;
-        if(mH < 50 || mW < 50){
+        if (mH < 50 || mW < 50) {
             Toast.makeText(mContext,"Region is too small.", Toast.LENGTH_SHORT).show();
             mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
-        }
-        else{
+        } else {
             screenshot();
         }
     }
 
-    private void updateClipBox(float inX1, float inY1, float inX2, float inY2){
-        if(inX1 > inX2){
+    private void updateClipBox(float inX1, float inY1, float inX2, float inY2) {
+        if(inX1 > inX2) {
             mX = (int)Math.ceil(inX2);
             mW = (int)Math.floor(inX1 - inX2);
-        }
-        else{
+        } else {
             mX = (int)Math.ceil(inX1);
             mW = (int)Math.floor(inX2 - inX1);
         }
-        if(inY1 > inY2){
+        if (inY1 > inY2) {
             mY = (int)Math.ceil(inY2);
             mH = (int)Math.floor(inY1 - inY2);
-        }
-        else{
+        } else {
             mY = (int)Math.ceil(inY1);
             mH = (int)Math.floor(inY2 - inY1);
         }
         Log.d("kanna","clip " + mX + " " + mY + " " + mW + " " + mH);
     }
 
-    private Bitmap createBitmap(Image image){
+    private Bitmap createBitmap(Image image) {
         Log.d("kanna", "check create bitmap: " + Thread.currentThread().toString());
         Bitmap bitmap, bitmapCut;
         Image.Plane[] planes = image.getPlanes();
@@ -338,7 +351,7 @@ public class BubbleService extends Service {
     }
 
     //https://stackoverflow.com/questions/14341041/how-to-get-real-screen-height-and-width
-    private Flowable<Image> getScreenShot(){
+    private Flowable<Image> getScreenShot() {
         final Point screenSize = new Point();
         final DisplayMetrics metrics = getResources().getDisplayMetrics();
         Display display = getWindowManager().getDefaultDisplay();
@@ -374,7 +387,8 @@ public class BubbleService extends Service {
             }
         }, BackpressureStrategy.DROP);
     }
-    private Flowable<String> createFile(){
+
+    private Flowable<String> createFile() {
         return Flowable.create(new FlowableOnSubscribe<String>() {
             @Override
             public void subscribe(@NonNull FlowableEmitter<String> emitter) throws Exception {
@@ -414,16 +428,18 @@ public class BubbleService extends Service {
                 emitter.onNext(fileName);
                 emitter.onComplete();
             }
-        },BackpressureStrategy.DROP).subscribeOn(Schedulers.io());
+        }, BackpressureStrategy.DROP).subscribeOn(Schedulers.io());
     }
-    private void writeFile(Bitmap bitmap, String fileName) throws IOException{
+
+    private void writeFile(Bitmap bitmap, String fileName) throws IOException {
         Log.d("kanna", "check write file: " + Thread.currentThread().toString());
         FileOutputStream fos = new FileOutputStream(fileName);
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
         fos.close();
         bitmap.recycle();
     }
-    private Flowable<String> updateScan(final String fileName){
+
+    private Flowable<String> updateScan(final String fileName) {
         return Flowable.create(new FlowableOnSubscribe<String>() {
             @Override
             public void subscribe(@NonNull final FlowableEmitter<String> emitter) throws Exception {
@@ -443,19 +459,20 @@ public class BubbleService extends Service {
                 };
                 MediaScannerConnection.scanFile(mContext, path, null, mScanListener);
             }
-        },BackpressureStrategy.DROP);
+        }, BackpressureStrategy.DROP);
     }
+
     private void finalRelease(){
-        if (mVirtualDisplay != null){
+        if (mVirtualDisplay != null) {
             mVirtualDisplay.release();
         }
-        if (mImageReader != null){
+        if (mImageReader != null) {
             mImageReader = null;
         }
-        if(mImageListener != null){
+        if(mImageListener != null) {
             mImageListener = null;
         }
-        if(mScanListener != null){
+        if(mScanListener != null) {
             mScanListener = null;
         }
     }
@@ -463,7 +480,7 @@ public class BubbleService extends Service {
     /*
     RXJava
      */
-    private void shotScreen(){
+    private void shotScreen() {
         getScreenShot()
                 .subscribeOn(AndroidSchedulers.mainThread())
                 .observeOn(Schedulers.io())
@@ -521,7 +538,7 @@ public class BubbleService extends Service {
                 });
     }
 
-    private void screenshot(){
+    private void screenshot() {
         if (sMediaProjection != null) {
             shotScreen();
         } else {
@@ -530,5 +547,17 @@ public class BubbleService extends Service {
         }
     }
 
-}
+    private void stopClipMode() {
+        getWindowManager().removeView(mClipLayoutBinding.getRoot());
+        isClipMode = false;
+        mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
+    }
 
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        if (isClipMode) {
+            stopClipMode();
+            Toast.makeText(mContext,"Configuration changed, stop clip mode.", Toast.LENGTH_SHORT).show();
+        }
+    }
+}

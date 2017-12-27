@@ -9,17 +9,16 @@ import android.view.WindowManager;
 public class BubbleHandler {
     public View.OnTouchListener mBubbleTouchListener;
     public View.OnTouchListener mClipViewTouchListener;
-
     private final BubbleService mBubbleService;
 
-    BubbleHandler(BubbleService service){
+    BubbleHandler(BubbleService service) {
         mBubbleService = service;
         setBubbleTouchListener();
         setClipViewTouchListener();
     }
 
-    private void setBubbleTouchListener(){
-        mBubbleTouchListener = new View.OnTouchListener(){
+    private void setBubbleTouchListener() {
+        mBubbleTouchListener = new View.OnTouchListener() {
             private int initialX;
             private int initialY;
             private float initialTouchX;
@@ -39,19 +38,18 @@ public class BubbleHandler {
                         break;
                     case MotionEvent.ACTION_UP:
                         view.performClick();
-                        if(isMove) {
+                        if (isMove) {
                             mBubbleService.checkRegion(motionEvent);
                             isMove = false;
                         }
                         Log.d("kanna", "move " + move);
-                        if(Math.abs(move)< 100) {
+                        if (Math.abs(move)< 100) {
                             mBubbleService.startClipMode();
                         }
-
                         break;
                     case MotionEvent.ACTION_MOVE:
                         isMove = true;
-                        mBubbleService.setmTrashVisible();
+                        mBubbleService.setTrashVisible();
                         params.x = initialX + (int) (motionEvent.getRawX() - initialTouchX);
                         params.y = initialY + (int) (motionEvent.getRawY() - initialTouchY);
                         move = motionEvent.getRawX() - initialTouchX + motionEvent.getRawY() - initialTouchY;
@@ -62,21 +60,18 @@ public class BubbleHandler {
             }
         };
     }
-    private void updateCustomView(ClipView view, float x1, float y1, float x2, float y2){
-        if(x1 > x2 && y1 > y2) {
+
+    private void updateCustomView(ClipView view, float x1, float y1, float x2, float y2) {
+        if (x1 > x2 && y1 > y2) {
             view.updateRegion(x2, y2, x1, y1);
-        }
-        else if(y1 > y2){
+        } else if(y1 > y2) {
             view.updateRegion(x1, y2, x2, y1);
-        }
-        else if(x1 > x2){
+        } else if(x1 > x2) {
             view.updateRegion(x2, y1, x1, y2);
-        }
-        else{
+        } else {
             view.updateRegion(x1, y1, x2, y2);
         }
     }
-
 
     private void setClipViewTouchListener(){
         mClipViewTouchListener = new View.OnTouchListener() {
@@ -84,7 +79,7 @@ public class BubbleHandler {
             private float rx1, ry1, rx2, ry2;
             @Override
             public boolean onTouch(View view, MotionEvent event) {
-                switch(event.getAction()){
+                switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
                         x1 = x2 = event.getX();
                         rx1 = rx2 = event.getRawX();
@@ -100,7 +95,7 @@ public class BubbleHandler {
                         break;
                     case MotionEvent.ACTION_UP:
                         view.performClick();
-                        mBubbleService.stopClipMode(rx1, ry1, rx2, ry2);
+                        mBubbleService.finishClipMode(rx1, ry1, rx2, ry2);
                         break;
                 }
                 //Log.d("kanna",x1 +" "+ y1 + " " + x2 + " " + y2);

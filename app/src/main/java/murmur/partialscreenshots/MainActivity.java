@@ -22,12 +22,9 @@ import android.widget.Toast;
 import murmur.partialscreenshots.databinding.ActivityMainBinding;
 
 public class MainActivity extends AppCompatActivity {
-
     public static MediaProjection sMediaProjection;
-
     private static final int MY_PERMISSIONS_REQUEST_READ_CONTACTS = 5566;
     private static final int REQUEST_CODE = 55566;
-
     private ActivityMainBinding binding;
     private MediaProjectionManager mProjectionManager;
 
@@ -39,7 +36,6 @@ public class MainActivity extends AppCompatActivity {
         checkWritePermission();
 
         mProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-
 
         binding.test.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -57,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private boolean checkWritePermission(){
+    private boolean checkWritePermission() {
         if (ContextCompat.checkSelfPermission(this,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -69,7 +65,7 @@ public class MainActivity extends AppCompatActivity {
         return true;
     }
 
-    private void startMediaProjection(){
+    private void startMediaProjection() {
         startActivityForResult(mProjectionManager.createScreenCaptureIntent(), REQUEST_CODE);
     }
 
@@ -101,14 +97,13 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if(requestCode == REQUEST_CODE){
+        if (requestCode == REQUEST_CODE) {
             sMediaProjection = mProjectionManager.getMediaProjection(resultCode, data);
-            if(sMediaProjection == null){
-                Log.d("kanna", "not get permission of mediaprojection");
+            if (sMediaProjection == null) {
+                Log.d("kanna", "not get permission of media projection");
                 Toast.makeText(this, "Need MediaProjection", Toast.LENGTH_LONG).show();
                 startMediaProjection();
-            }
-            else {
+            } else {
                 startBubble();
             }
         }
@@ -117,17 +112,16 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume(){
         super.onResume();
-        if(sMediaProjection == null){
+        if (sMediaProjection == null) {
             binding.test.setVisibility(View.VISIBLE);
         }
     }
 
-    private void startBubble(){
+    private void startBubble() {
         Log.d("kanna","start bubble");
         binding.test.setVisibility(View.GONE);
         Intent intent = new Intent(this, BubbleService.class);
         stopService(intent);
         startService(intent);
     }
-
 }
