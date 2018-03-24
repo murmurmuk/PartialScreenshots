@@ -37,19 +37,16 @@ public class MainActivity extends AppCompatActivity {
 
         mProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
 
-        binding.test.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                if(!checkDrawOverlayPermission()){
-                    checkDrawOverlayPermission();
-                    return;
-                }
-                if(!checkWritePermission()){
-                    checkWritePermission();
-                    return;
-                }
-                startMediaProjection();
+        binding.test.setOnClickListener(view -> {
+            if(!checkDrawOverlayPermission()){
+                checkDrawOverlayPermission();
+                return;
             }
+            if(!checkWritePermission()){
+                checkWritePermission();
+                return;
+            }
+            startMediaProjection();
         });
     }
 

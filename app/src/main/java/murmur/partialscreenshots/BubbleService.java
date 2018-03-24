@@ -12,7 +12,6 @@ import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaScannerConnection;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
@@ -26,10 +25,6 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Toast;
 
-import org.reactivestreams.Publisher;
-import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -38,15 +33,9 @@ import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Locale;
 
-import io.reactivex.BackpressureStrategy;
-import io.reactivex.Flowable;
-import io.reactivex.FlowableEmitter;
-import io.reactivex.FlowableOnSubscribe;
+import io.reactivex.Single;
+import io.reactivex.SingleOnSubscribe;
 import io.reactivex.android.schedulers.AndroidSchedulers;
-import io.reactivex.annotations.NonNull;
-import io.reactivex.functions.Action;
-import io.reactivex.functions.BiFunction;
-import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
 import murmur.partialscreenshots.databinding.BubbleLayoutBinding;
 import murmur.partialscreenshots.databinding.ClipLayoutBinding;
@@ -351,84 +340,75 @@ public class BubbleService extends Service {
     }
 
     //https://stackoverflow.com/questions/14341041/how-to-get-real-screen-height-and-width
-    private Flowable<Image> getScreenShot() {
+    private Single<Image> getScreenShot() {
         final Point screenSize = new Point();
         final DisplayMetrics metrics = getResources().getDisplayMetrics();
         Display display = getWindowManager().getDefaultDisplay();
         display.getRealSize(screenSize);
-        return Flowable.create(new FlowableOnSubscribe<Image>() {
-            @Override
-            public void subscribe(@NonNull final FlowableEmitter<Image> emitter) throws Exception {
-                mImageReader = ImageReader.newInstance(screenSize.x, screenSize.y, PixelFormat.RGBA_8888, 2);
-                mVirtualDisplay = sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
-                        metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                        mImageReader.getSurface(), null, null);
-                mImageListener = new ImageReader.OnImageAvailableListener() {
-                    Image image = null;
-                    @Override
-                    public void onImageAvailable(ImageReader imageReader) {
-                        try {
-                            image = imageReader.acquireLatestImage();
-                            Log.d("kanna", "check reader: " + Thread.currentThread().toString());
-                            if (image != null) {
-                                emitter.onNext(image);
-                                emitter.onComplete();
-                            }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                            emitter.onError(new Throwable("ImageReader error"));
+        return Single.create(emitter -> {
+            mImageReader = ImageReader.newInstance(screenSize.x, screenSize.y, PixelFormat.RGBA_8888, 2);
+            mVirtualDisplay = sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
+                    metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    mImageReader.getSurface(), null, null);
+            mImageListener = new ImageReader.OnImageAvailableListener() {
+                Image image = null;
+                @Override
+                public void onImageAvailable(ImageReader imageReader) {
+                    try {
+                        image = imageReader.acquireLatestImage();
+                        Log.d("kanna", "check reader: " + Thread.currentThread().toString());
+                        if (image != null) {
+                            emitter.onSuccess(image);
                         }
-                        mImageReader.setOnImageAvailableListener(null, null);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        emitter.onError(new Throwable("ImageReader error"));
                     }
+                    mImageReader.setOnImageAvailableListener(null, null);
+                }
 
-                };
-                mImageReader.setOnImageAvailableListener(mImageListener, null);
-
-            }
-        }, BackpressureStrategy.DROP);
+            };
+            mImageReader.setOnImageAvailableListener(mImageListener, null);
+        });
     }
 
-    private Flowable<String> createFile() {
-        return Flowable.create(new FlowableOnSubscribe<String>() {
-            @Override
-            public void subscribe(@NonNull FlowableEmitter<String> emitter) throws Exception {
-                Log.d("kanna", "check create filename: " + Thread.currentThread().toString());
-                String directory, fileHead, fileName;
-                int count = 0;
-                File externalFilesDir = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES);
-                if (externalFilesDir != null) {
-                    directory = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES)
-                            .getAbsolutePath() + "/screenshots/";
+    private Single<String> createFile() {
+        return Single.create((SingleOnSubscribe<String>) emitter -> {
+            Log.d("kanna", "check create filename: " + Thread.currentThread().toString());
+            String directory, fileHead, fileName;
+            int count = 0;
+            File externalFilesDir = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES);
+            if (externalFilesDir != null) {
+                directory = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES)
+                        .getAbsolutePath() + "/screenshots/";
 
-                    Log.d("kanna", directory);
-                    File storeDirectory = new File(directory);
-                    if (!storeDirectory.exists()) {
-                        boolean success = storeDirectory.mkdirs();
-                        if (!success) {
-                            emitter.onError(new Throwable("failed to create file storage directory."));
-                            return;
-                        }
+                Log.d("kanna", directory);
+                File storeDirectory = new File(directory);
+                if (!storeDirectory.exists()) {
+                    boolean success = storeDirectory.mkdirs();
+                    if (!success) {
+                        emitter.onError(new Throwable("failed to create file storage directory."));
+                        return;
                     }
-                } else {
-                    emitter.onError(new Throwable("failed to create file storage directory," +
-                            " getExternalFilesDir is null."));
-                    return;
                 }
-
-                SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH);
-                Calendar c = Calendar.getInstance();
-                fileHead = simpleDateFormat.format(c.getTime()) + "_";
-                fileName = directory + fileHead + count + ".png";
-                File storeFile = new File(fileName);
-                while (storeFile.exists()) {
-                    count++;
-                    fileName = directory + fileHead + count + ".png";
-                    storeFile = new File(fileName);
-                }
-                emitter.onNext(fileName);
-                emitter.onComplete();
+            } else {
+                emitter.onError(new Throwable("failed to create file storage directory," +
+                        " getExternalFilesDir is null."));
+                return;
             }
-        }, BackpressureStrategy.DROP).subscribeOn(Schedulers.io());
+
+            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH);
+            Calendar c = Calendar.getInstance();
+            fileHead = simpleDateFormat.format(c.getTime()) + "_";
+            fileName = directory + fileHead + count + ".png";
+            File storeFile = new File(fileName);
+            while (storeFile.exists()) {
+                count++;
+                fileName = directory + fileHead + count + ".png";
+                storeFile = new File(fileName);
+            }
+            emitter.onSuccess(fileName);
+        }).subscribeOn(Schedulers.io());
     }
 
     private void writeFile(Bitmap bitmap, String fileName) throws IOException {
@@ -439,27 +419,20 @@ public class BubbleService extends Service {
         bitmap.recycle();
     }
 
-    private Flowable<String> updateScan(final String fileName) {
-        return Flowable.create(new FlowableOnSubscribe<String>() {
-            @Override
-            public void subscribe(@NonNull final FlowableEmitter<String> emitter) throws Exception {
-                String[] path = new String[]{fileName};
-                mScanListener = new MediaScannerConnection.OnScanCompletedListener() {
-                    @Override
-                    public void onScanCompleted(String s, Uri uri) {
-                        Log.d("kanna", "check scan file: " + Thread.currentThread().toString());
-                        if (uri == null) {
-                            emitter.onError(new Throwable("Scan fail" + s));
-                        }
-                        else {
-                            emitter.onNext(s);
-                            emitter.onComplete();
-                        }
-                    }
-                };
-                MediaScannerConnection.scanFile(mContext, path, null, mScanListener);
-            }
-        }, BackpressureStrategy.DROP);
+    private Single<String> updateScan(final String fileName) {
+        return Single.create(emitter -> {
+            String[] path = new String[]{fileName};
+            mScanListener = (s, uri) -> {
+                Log.d("kanna", "check scan file: " + Thread.currentThread().toString());
+                if (uri == null) {
+                    emitter.onError(new Throwable("Scan fail" + s));
+                }
+                else {
+                    emitter.onSuccess(s);
+                }
+            };
+            MediaScannerConnection.scanFile(mContext, path, null, mScanListener);
+        });
     }
 
     private void finalRelease(){
@@ -484,58 +457,28 @@ public class BubbleService extends Service {
         getScreenShot()
                 .subscribeOn(AndroidSchedulers.mainThread())
                 .observeOn(Schedulers.io())
-                .map(new Function<Image, Bitmap>() {
-                    @Override
-                    public Bitmap apply(@NonNull Image image) throws Exception {
-                        return createBitmap(image);
-                    }
+                .map(this::createBitmap)
+                .zipWith(createFile(), (bitmap, fileName) -> {
+                    writeFile(bitmap, fileName);
+                    return fileName;
                 })
-                .zipWith(createFile(), new BiFunction<Bitmap, String, String>() {
-                    @Override
-                    public String apply(@NonNull Bitmap bitmap, @NonNull String fileName) throws Exception {
-                        writeFile(bitmap, fileName);
-                        return fileName;
-                    }
-                })
-                .flatMap(new Function<String, Publisher<String>>() {
-                    @Override
-                    public Publisher<String> apply(@NonNull String fileName) throws Exception {
-                        return updateScan(fileName);
-                    }
-                })
+                .flatMap(this::updateScan)
                 .observeOn(AndroidSchedulers.mainThread())
-                .doFinally(new Action() {
-                    @Override
-                    public void run() throws Exception {
-                        Log.d("kanna", "check do finally: " + Thread.currentThread().toString());
-                        mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
-                        finalRelease();
-                    }
+                .doFinally(() -> {
+                    Log.d("kanna", "check do finally: " + Thread.currentThread().toString());
+                    mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
+                    finalRelease();
                 })
-                .subscribe(new Subscriber<String>() {
-
-                    @Override
-                    public void onSubscribe(Subscription s) {
-                        s.request(Long.MAX_VALUE);
-                    }
-
-                    @Override
-                    public void onNext(String filename) {
-                        Log.d("kanna", "onNext: " + filename);
-                        Toast.makeText(mContext, "Create file: " + filename, LENGTH_LONG).show();
-                    }
-
-                    @Override
-                    public void onError(Throwable t) {
-                        Log.d("kanna", "onError: ", t);
-                        Toast.makeText(mContext, "Error occur: " + t, LENGTH_LONG).show();
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        Log.d("kanna", "onComplete");
-                    }
-                });
+                .subscribe(
+                        fileName -> {
+                            Log.d("kanna", "onSuccess: " + fileName);
+                            Toast.makeText(mContext, "Create file: " + fileName, LENGTH_LONG).show();
+                        },
+                        throwable -> {
+                            Log.d("kanna", "onError: ", throwable);
+                            Toast.makeText(mContext, "Error occur: " + throwable, LENGTH_LONG).show();
+                        }
+                );
     }
 
     private void screenshot() {
