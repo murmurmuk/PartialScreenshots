@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">PartialScreenshots</string>
+    <string name="screenshot">Screen shot button</string>
 </resources>

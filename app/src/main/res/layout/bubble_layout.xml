@@ -7,7 +7,8 @@
         android:background="@drawable/circles"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:contentDescription="@string/screenshot"
         android:src="@drawable/ic_camera_alt_black_24dp"
-        android:onTouchListener="@{handler.mBubbleTouchListener}"
+        android:onTouch="@{handler::onTouch}"
         />
 </layout>

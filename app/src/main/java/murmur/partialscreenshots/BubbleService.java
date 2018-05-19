@@ -1,14 +1,13 @@
 package murmur.partialscreenshots;
 
+import android.annotation.SuppressLint;
 import android.app.Service;
-import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
-import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaScannerConnection;
@@ -20,7 +19,6 @@ import android.util.Log;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Toast;
@@ -42,35 +40,21 @@ import murmur.partialscreenshots.databinding.ClipLayoutBinding;
 import murmur.partialscreenshots.databinding.TrashLayoutBinding;
 
 import static android.os.Environment.DIRECTORY_PICTURES;
-import static android.widget.Toast.LENGTH_LONG;
 import static murmur.partialscreenshots.MainActivity.sMediaProjection;
 
 public class BubbleService extends Service {
     private WindowManager mWindowManager;
-    private Context mContext;
     private BubbleLayoutBinding mBubbleLayoutBinding;
     private WindowManager.LayoutParams mBubbleLayoutParams;
     private TrashLayoutBinding mTrashLayoutBinding;
     private WindowManager.LayoutParams mTrashLayoutParams;
     private ClipLayoutBinding mClipLayoutBinding;
-    private WindowManager.LayoutParams mClipLayoutParams;
-    private BubbleHandler mBubbleHandler;
+    private int[] closeRegion = null;//left, top, right, bottom
     private boolean isClipMode;
-    private ImageReader mImageReader;
-    private VirtualDisplay mVirtualDisplay;
-    private MediaScannerConnection.OnScanCompletedListener mScanListener;
-    private ImageReader.OnImageAvailableListener mImageListener;
-    private int mX, mY, mW, mH;
 
     @Override
     public IBinder onBind(Intent intent) {
         return null;
-    }
-
-    @Override
-    public void onCreate() {
-        super.onCreate();
-        mContext = this;
     }
 
     @Override
@@ -83,46 +67,9 @@ public class BubbleService extends Service {
         return super.onStartCommand(intent, flags, startId);
     }
 
-    @Override
-    public void onDestroy() {
-        if (mWindowManager != null) {
-            if (mBubbleLayoutBinding != null) {
-                mWindowManager.removeView(mBubbleLayoutBinding.getRoot());
-                mBubbleLayoutBinding = null;
-                if (mBubbleLayoutParams != null) {
-                    mBubbleLayoutParams = null;
-                }
-            }
-            if (mTrashLayoutBinding != null) {
-                mWindowManager.removeView(mTrashLayoutBinding.getRoot());
-                mTrashLayoutBinding = null;
-                if (mTrashLayoutParams != null) {
-                    mTrashLayoutParams = null;
-                }
-            }
-            if (mClipLayoutBinding != null) {
-                if (isClipMode) {
-                    mWindowManager.removeView(mClipLayoutBinding.getRoot());
-                    isClipMode = false;
-                }
-                mClipLayoutBinding = null;
-                if (mClipLayoutParams != null) {
-                    mClipLayoutParams = null;
-                }
-            }
-            mWindowManager = null;
-            mBubbleHandler = null;
-        }
-        if (sMediaProjection != null) {
-            sMediaProjection.stop();
-            sMediaProjection = null;
-        }
-        super.onDestroy();
-    }
-
     private void initial() {
         Log.d("kanna","initial");
-        LayoutInflater layoutInflater = LayoutInflater.from(mContext);
+        LayoutInflater layoutInflater = LayoutInflater.from(this);
         mTrashLayoutBinding = TrashLayoutBinding.inflate(layoutInflater);
         if (mTrashLayoutParams == null) {
             mTrashLayoutParams = buildLayoutParamsForBubble(0, 0);
@@ -131,17 +78,12 @@ public class BubbleService extends Service {
         getWindowManager().addView(mTrashLayoutBinding.getRoot(), mTrashLayoutParams);
         mTrashLayoutBinding.getRoot().setVisibility(View.GONE);
 
-        mBubbleHandler = new BubbleHandler(this);
-
-
         mBubbleLayoutBinding = BubbleLayoutBinding.inflate(layoutInflater);
         if (mBubbleLayoutParams == null) {
             mBubbleLayoutParams = buildLayoutParamsForBubble(60, 60);
         }
-        mBubbleLayoutBinding.setHandler(mBubbleHandler);
+        mBubbleLayoutBinding.setHandler(new BubbleHandler(this));
         getWindowManager().addView(mBubbleLayoutBinding.getRoot(), mBubbleLayoutParams);
-
-        isClipMode = false;
     }
 
     private WindowManager getWindowManager() {
@@ -149,6 +91,128 @@ public class BubbleService extends Service {
             mWindowManager = (WindowManager)getSystemService(WINDOW_SERVICE);
         }
         return mWindowManager;
+    }
+
+    public void checkInCloseRegion(float x, float y) {
+        if (closeRegion == null) {
+            int location[] = new int[2];
+            View v = mTrashLayoutBinding.getRoot();
+            v.getLocationOnScreen(location);
+            closeRegion = new int[]{location[0], location[1],
+                    location[0] + v.getWidth(), location[1] + v.getHeight()};
+        }
+
+        if (Float.compare(x, closeRegion[0]) >= 0 &&
+                Float.compare(y, closeRegion[1]) >= 0 &&
+                Float.compare(x, closeRegion[2]) <= 0 &&
+                Float.compare(3, closeRegion[3]) <= 0) {
+            stopSelf();
+        } else {
+            mTrashLayoutBinding.getRoot().setVisibility(View.VISIBLE);
+        }
+    }
+
+    public void updateViewLayout(View view, WindowManager.LayoutParams params) {
+        mTrashLayoutBinding.getRoot().setVisibility(View.VISIBLE);
+        getWindowManager().updateViewLayout(view, params);
+    }
+
+    public void startClipMode() {
+        isClipMode = true;
+        if (mClipLayoutBinding == null) {
+            LayoutInflater layoutInflater = LayoutInflater.from(this);
+            mClipLayoutBinding = ClipLayoutBinding.inflate(layoutInflater);
+            mClipLayoutBinding.setHandler(new ClipHandler(this));
+        }
+        WindowManager.LayoutParams mClipLayoutParams = buildLayoutParamsForClip();
+        ((ClipView)mClipLayoutBinding.getRoot()).updateRegion(0, 0, 0, 0);
+        mBubbleLayoutBinding.getRoot().setVisibility(View.GONE);
+        getWindowManager().addView(mClipLayoutBinding.getRoot(), mClipLayoutParams);
+        Toast.makeText(this,"Start clip mode.",Toast.LENGTH_SHORT).show();
+    }
+
+    public void finishClipMode(int[] clipRegion) {
+        isClipMode = false;
+        getWindowManager().removeView(mClipLayoutBinding.getRoot());
+        if (clipRegion[2] < 50 || clipRegion[3] < 50) {
+            Toast.makeText(this,"Region is too small.", Toast.LENGTH_SHORT).show();
+            mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
+        } else {
+            screenshot(clipRegion);
+        }
+    }
+
+    public void screenshot(int[] clipRegion) {
+        if (sMediaProjection != null) {
+            shotScreen(clipRegion);
+        } else {
+            Toast.makeText(this,
+                    "No MediaProjection, stop bubble.", Toast.LENGTH_LONG).show();
+            stopSelf();
+        }
+    }
+
+    @SuppressLint("CheckResult")
+    private void shotScreen(int[] clipRegion) {
+        getScreenShot()
+                .subscribeOn(AndroidSchedulers.mainThread())
+                .observeOn(Schedulers.io())
+                .map(image -> createBitmap(image, clipRegion))
+                .zipWith(createFile(), (bitmap, fileName) -> {
+                    writeFile(bitmap, fileName);
+                    return fileName;
+                })
+                .flatMap(this::updateScan)
+                .observeOn(AndroidSchedulers.mainThread())
+                .doFinally(() -> {
+                    Log.d("kanna", "do finally: " + Thread.currentThread().toString());
+                    mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
+                })
+                .subscribe(
+                        fileName -> {
+                            Log.d("kanna", "onSuccess: " + fileName);
+                            Toast.makeText(this, "Create file: " +
+                                    fileName, Toast.LENGTH_LONG).show();
+                        },
+                        throwable -> {
+                            Log.d("kanna", "onError: ", throwable);
+                            Toast.makeText(this, "Error occur: " +
+                                    throwable, Toast.LENGTH_LONG).show();
+                        }
+                );
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        if (isClipMode) {
+            isClipMode = false;
+            getWindowManager().removeView(mClipLayoutBinding.getRoot());
+            Toast.makeText(this,"Configuration changed, stop clip mode.",
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        if (mWindowManager != null) {
+            if (mBubbleLayoutBinding != null) {
+                mWindowManager.removeView(mBubbleLayoutBinding.getRoot());
+            }
+            if (mTrashLayoutBinding != null) {
+                mWindowManager.removeView(mTrashLayoutBinding.getRoot());
+            }
+            if (mClipLayoutBinding != null) {
+                if (isClipMode) {
+                    mWindowManager.removeView(mClipLayoutBinding.getRoot());
+                }
+            }
+            mWindowManager = null;
+        }
+        if (sMediaProjection != null) {
+            sMediaProjection.stop();
+            sMediaProjection = null;
+        }
+        super.onDestroy();
     }
 
     private WindowManager.LayoutParams buildLayoutParamsForBubble(int x, int y) {
@@ -246,82 +310,56 @@ public class BubbleService extends Service {
         return params;
     }
 
-    public void setTrashVisible() {
-        if (mTrashLayoutBinding != null) {
-            mTrashLayoutBinding.getRoot().setVisibility(View.VISIBLE);
-        }
+    //https://stackoverflow.com/questions/14341041/how-to-get-real-screen-height-and-width
+    private Single<Image> getScreenShot() {
+        final Point screenSize = new Point();
+        final DisplayMetrics metrics = getResources().getDisplayMetrics();
+        Display display = getWindowManager().getDefaultDisplay();
+        display.getRealSize(screenSize);
+        return Single.create(emitter -> {
+            ImageReader imageReader = ImageReader.newInstance(screenSize.x, screenSize.y,
+                    PixelFormat.RGBA_8888, 2);
+            sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
+                    metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader.getSurface(), null, null);
+            ImageReader.OnImageAvailableListener mImageListener =
+                    new ImageReader.OnImageAvailableListener() {
+                Image image = null;
+                @Override
+                public void onImageAvailable(ImageReader imageReader) {
+                    try {
+                        image = imageReader.acquireLatestImage();
+                        Log.d("kanna", "reader: " + Thread.currentThread().toString());
+                        if (image != null) {
+                            emitter.onSuccess(image);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        emitter.onError(new Throwable("ImageReader error"));
+                    }
+                    imageReader.setOnImageAvailableListener(null, null);
+                }
+
+            };
+            imageReader.setOnImageAvailableListener(mImageListener, null);
+        });
     }
 
-    public void checkRegion(MotionEvent motionEvent) {
-        int location[] = new int[2];
-        int trashLeft, trashRight, trashTop, trashBottom;
-        float x, y;
-        View trashView= mTrashLayoutBinding.getRoot();
-        trashView.getLocationOnScreen(location);
-        trashLeft = location[0];
-        trashRight = trashLeft + trashView.getWidth();
-        trashTop = location[1];
-        trashBottom = trashTop + trashView.getHeight();
-        x = motionEvent.getRawX();
-        y = motionEvent.getRawY();
-        Log.d("kanna",trashLeft + " " + trashRight + " " + trashTop + " " + trashBottom + " " + x + " " +y);
-        if( x >= trashLeft && x <= trashRight && y >= trashTop && y <= trashBottom) {
-            Log.d("kanna","stop self");
-            stopSelf();
-        } else {
-            trashView.setVisibility(View.GONE);
-        }
+    private Single<String> updateScan(final String fileName) {
+        return Single.create(emitter -> {
+            String[] path = new String[]{fileName};
+            MediaScannerConnection.scanFile(this, path, null, (s, uri) -> {
+                Log.d("kanna", "scan file: " + Thread.currentThread().toString());
+                if (uri == null) {
+                    emitter.onError(new Throwable("Scan fail" + s));
+                } else {
+                    emitter.onSuccess(s);
+                }
+            });
+        });
     }
 
-    public void updateViewLayout(View view, WindowManager.LayoutParams params) {
-        getWindowManager().updateViewLayout(view, params);
-    }
-
-    public void startClipMode() {
-        if (mClipLayoutBinding == null) {
-            LayoutInflater layoutInflater = LayoutInflater.from(mContext);
-            mClipLayoutBinding = ClipLayoutBinding.inflate(layoutInflater);
-            mClipLayoutBinding.setHandler(mBubbleHandler);
-        }
-        mClipLayoutParams = buildLayoutParamsForClip();
-        isClipMode = true;
-        ((ClipView)mClipLayoutBinding.getRoot()).updateRegion(0, 0, 0, 0);
-        mBubbleLayoutBinding.getRoot().setVisibility(View.GONE);
-        getWindowManager().addView(mClipLayoutBinding.getRoot(), mClipLayoutParams);
-        Toast.makeText(mContext,"Start clip mode.",Toast.LENGTH_SHORT).show();
-    }
-
-    public void finishClipMode(float inX1, float inY1, float inX2, float inY2) {
-        updateClipBox(inX1, inY1, inX2, inY2);
-        getWindowManager().removeView(mClipLayoutBinding.getRoot());
-        isClipMode = false;
-        if (mH < 50 || mW < 50) {
-            Toast.makeText(mContext,"Region is too small.", Toast.LENGTH_SHORT).show();
-            mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
-        } else {
-            screenshot();
-        }
-    }
-
-    private void updateClipBox(float inX1, float inY1, float inX2, float inY2) {
-        if(inX1 > inX2) {
-            mX = (int)Math.ceil(inX2);
-            mW = (int)Math.floor(inX1 - inX2);
-        } else {
-            mX = (int)Math.ceil(inX1);
-            mW = (int)Math.floor(inX2 - inX1);
-        }
-        if (inY1 > inY2) {
-            mY = (int)Math.ceil(inY2);
-            mH = (int)Math.floor(inY1 - inY2);
-        } else {
-            mY = (int)Math.ceil(inY1);
-            mH = (int)Math.floor(inY2 - inY1);
-        }
-        Log.d("kanna","clip " + mX + " " + mY + " " + mW + " " + mH);
-    }
-
-    private Bitmap createBitmap(Image image) {
+    private Bitmap createBitmap(Image image, int[] clipRegion) {
         Log.d("kanna", "check create bitmap: " + Thread.currentThread().toString());
         Bitmap bitmap, bitmapCut;
         Image.Plane[] planes = image.getPlanes();
@@ -333,43 +371,19 @@ public class BubbleService extends Service {
         bitmap = Bitmap.createBitmap(image.getWidth() + rowPadding / pixelStride,
                 image.getHeight(), Bitmap.Config.ARGB_8888);
         bitmap.copyPixelsFromBuffer(buffer);
-        bitmapCut = Bitmap.createBitmap(bitmap, mX, mY, mW, mH);
+        bitmapCut = Bitmap.createBitmap(bitmap,
+                clipRegion[0], clipRegion[1], clipRegion[2], clipRegion[3]);
         bitmap.recycle();
         image.close();
         return bitmapCut;
     }
 
-    //https://stackoverflow.com/questions/14341041/how-to-get-real-screen-height-and-width
-    private Single<Image> getScreenShot() {
-        final Point screenSize = new Point();
-        final DisplayMetrics metrics = getResources().getDisplayMetrics();
-        Display display = getWindowManager().getDefaultDisplay();
-        display.getRealSize(screenSize);
-        return Single.create(emitter -> {
-            mImageReader = ImageReader.newInstance(screenSize.x, screenSize.y, PixelFormat.RGBA_8888, 2);
-            mVirtualDisplay = sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
-                    metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    mImageReader.getSurface(), null, null);
-            mImageListener = new ImageReader.OnImageAvailableListener() {
-                Image image = null;
-                @Override
-                public void onImageAvailable(ImageReader imageReader) {
-                    try {
-                        image = imageReader.acquireLatestImage();
-                        Log.d("kanna", "check reader: " + Thread.currentThread().toString());
-                        if (image != null) {
-                            emitter.onSuccess(image);
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        emitter.onError(new Throwable("ImageReader error"));
-                    }
-                    mImageReader.setOnImageAvailableListener(null, null);
-                }
-
-            };
-            mImageReader.setOnImageAvailableListener(mImageListener, null);
-        });
+    private void writeFile(Bitmap bitmap, String fileName) throws IOException {
+        Log.d("kanna", "check write file: " + Thread.currentThread().toString());
+        FileOutputStream fos = new FileOutputStream(fileName);
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+        fos.close();
+        bitmap.recycle();
     }
 
     private Single<String> createFile() {
@@ -377,7 +391,8 @@ public class BubbleService extends Service {
             Log.d("kanna", "check create filename: " + Thread.currentThread().toString());
             String directory, fileHead, fileName;
             int count = 0;
-            File externalFilesDir = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES);
+            File externalFilesDir = Environment.
+                    getExternalStoragePublicDirectory(DIRECTORY_PICTURES);
             if (externalFilesDir != null) {
                 directory = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES)
                         .getAbsolutePath() + "/screenshots/";
@@ -397,7 +412,8 @@ public class BubbleService extends Service {
                 return;
             }
 
-            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH);
+            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd",
+                    Locale.ENGLISH);
             Calendar c = Calendar.getInstance();
             fileHead = simpleDateFormat.format(c.getTime()) + "_";
             fileName = directory + fileHead + count + ".png";
@@ -409,98 +425,5 @@ public class BubbleService extends Service {
             }
             emitter.onSuccess(fileName);
         }).subscribeOn(Schedulers.io());
-    }
-
-    private void writeFile(Bitmap bitmap, String fileName) throws IOException {
-        Log.d("kanna", "check write file: " + Thread.currentThread().toString());
-        FileOutputStream fos = new FileOutputStream(fileName);
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
-        fos.close();
-        bitmap.recycle();
-    }
-
-    private Single<String> updateScan(final String fileName) {
-        return Single.create(emitter -> {
-            String[] path = new String[]{fileName};
-            mScanListener = (s, uri) -> {
-                Log.d("kanna", "check scan file: " + Thread.currentThread().toString());
-                if (uri == null) {
-                    emitter.onError(new Throwable("Scan fail" + s));
-                }
-                else {
-                    emitter.onSuccess(s);
-                }
-            };
-            MediaScannerConnection.scanFile(mContext, path, null, mScanListener);
-        });
-    }
-
-    private void finalRelease(){
-        if (mVirtualDisplay != null) {
-            mVirtualDisplay.release();
-        }
-        if (mImageReader != null) {
-            mImageReader = null;
-        }
-        if(mImageListener != null) {
-            mImageListener = null;
-        }
-        if(mScanListener != null) {
-            mScanListener = null;
-        }
-    }
-
-    /*
-    RXJava
-     */
-    private void shotScreen() {
-        getScreenShot()
-                .subscribeOn(AndroidSchedulers.mainThread())
-                .observeOn(Schedulers.io())
-                .map(this::createBitmap)
-                .zipWith(createFile(), (bitmap, fileName) -> {
-                    writeFile(bitmap, fileName);
-                    return fileName;
-                })
-                .flatMap(this::updateScan)
-                .observeOn(AndroidSchedulers.mainThread())
-                .doFinally(() -> {
-                    Log.d("kanna", "check do finally: " + Thread.currentThread().toString());
-                    mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
-                    finalRelease();
-                })
-                .subscribe(
-                        fileName -> {
-                            Log.d("kanna", "onSuccess: " + fileName);
-                            Toast.makeText(mContext, "Create file: " + fileName, LENGTH_LONG).show();
-                        },
-                        throwable -> {
-                            Log.d("kanna", "onError: ", throwable);
-                            Toast.makeText(mContext, "Error occur: " + throwable, LENGTH_LONG).show();
-                        }
-                );
-    }
-
-    private void screenshot() {
-        if (sMediaProjection != null) {
-            shotScreen();
-        } else {
-            Toast.makeText(mContext, "No MediaProjection, stop bubble.", LENGTH_LONG).show();
-            stopSelf();
-        }
-    }
-
-    private void stopClipMode() {
-        getWindowManager().removeView(mClipLayoutBinding.getRoot());
-        isClipMode = false;
-        mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
-    }
-
-    @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        if (isClipMode) {
-            stopClipMode();
-            Toast.makeText(mContext,"Configuration changed, stop clip mode.", Toast.LENGTH_SHORT).show();
-        }
     }
 }
