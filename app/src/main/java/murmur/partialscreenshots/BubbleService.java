@@ -108,7 +108,7 @@ public class BubbleService extends Service {
                 Float.compare(3, closeRegion[3]) <= 0) {
             stopSelf();
         } else {
-            mTrashLayoutBinding.getRoot().setVisibility(View.VISIBLE);
+            mTrashLayoutBinding.getRoot().setVisibility(View.GONE);
         }
     }
 
@@ -118,6 +118,7 @@ public class BubbleService extends Service {
     }
 
     public void startClipMode() {
+        mTrashLayoutBinding.getRoot().setVisibility(View.GONE);
         isClipMode = true;
         if (mClipLayoutBinding == null) {
             LayoutInflater layoutInflater = LayoutInflater.from(this);
