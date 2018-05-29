@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaScannerConnection;
@@ -51,6 +52,8 @@ public class BubbleService extends Service {
     private ClipLayoutBinding mClipLayoutBinding;
     private int[] closeRegion = null;//left, top, right, bottom
     private boolean isClipMode;
+    private ImageReader imageReader;
+    private VirtualDisplay virtualDisplay;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -167,6 +170,7 @@ public class BubbleService extends Service {
                 .observeOn(AndroidSchedulers.mainThread())
                 .doFinally(() -> {
                     Log.d("kanna", "do finally: " + Thread.currentThread().toString());
+                    finalRelease();
                     mBubbleLayoutBinding.getRoot().setVisibility(View.VISIBLE);
                 })
                 .subscribe(
@@ -181,6 +185,17 @@ public class BubbleService extends Service {
                                     throwable, Toast.LENGTH_LONG).show();
                         }
                 );
+    }
+
+    private void finalRelease() {
+        if (virtualDisplay != null) {
+            virtualDisplay.release();
+            virtualDisplay = null;
+        }
+        if (imageReader != null) {
+            imageReader.close();
+            imageReader = null;
+        }
     }
 
     @Override
@@ -318,9 +333,9 @@ public class BubbleService extends Service {
         Display display = getWindowManager().getDefaultDisplay();
         display.getRealSize(screenSize);
         return Single.create(emitter -> {
-            ImageReader imageReader = ImageReader.newInstance(screenSize.x, screenSize.y,
+            imageReader = ImageReader.newInstance(screenSize.x, screenSize.y,
                     PixelFormat.RGBA_8888, 2);
-            sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
+            virtualDisplay = sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
                     metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     imageReader.getSurface(), null, null);
             ImageReader.OnImageAvailableListener mImageListener =
