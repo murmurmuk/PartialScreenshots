@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import androidx.databinding.DataBindingUtil;
-import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
@@ -16,22 +15,23 @@ import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.View;
-import android.widget.Toast;
 
 import murmur.partialscreenshots.databinding.ActivityMainBinding;
 
+import static android.os.Build.VERSION_CODES.Q;
+import static murmur.partialscreenshots.BubbleService.CODE;
+import static murmur.partialscreenshots.BubbleService.DATA;
+
 public class MainActivity extends AppCompatActivity {
-    public static MediaProjection sMediaProjection;
     private static final int MY_PERMISSIONS_REQUEST_READ_CONTACTS = 5566;
     private static final int REQUEST_CODE = 55566;
-    private ActivityMainBinding binding;
     private MediaProjectionManager mProjectionManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        binding = DataBindingUtil.setContentView(this, R.layout.activity_main);
+        ActivityMainBinding binding = DataBindingUtil
+                .setContentView(this, R.layout.activity_main);
         checkDrawOverlayPermission();
         checkWritePermission();
 
@@ -79,46 +79,34 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode,
-                                           @NonNull String permissions[], @NonNull int[] grantResults) {
-        switch (requestCode) {
-            case MY_PERMISSIONS_REQUEST_READ_CONTACTS:
-                if (grantResults.length > 0
-                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    Log.d("kanna","get write permission");
-                }
-                break;
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        if (requestCode == MY_PERMISSIONS_REQUEST_READ_CONTACTS) {
+            if (grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d("kanna", "get write permission");
+            }
         }
     }
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE) {
-            sMediaProjection = mProjectionManager.getMediaProjection(resultCode, data);
-            if (sMediaProjection == null) {
-                Log.d("kanna", "not get permission of media projection");
-                Toast.makeText(this, "Need MediaProjection", Toast.LENGTH_LONG).show();
-                startMediaProjection();
-            } else {
-                startBubble();
-            }
+        if (requestCode == REQUEST_CODE && resultCode == RESULT_OK) {
+            startBubble(resultCode, data);
         }
     }
 
-    @Override
-    protected void onResume(){
-        super.onResume();
-        if (sMediaProjection == null) {
-            binding.test.setVisibility(View.VISIBLE);
-        }
-    }
-
-    private void startBubble() {
+    private void startBubble(int resultCode, Intent data) {
         Log.d("kanna","start bubble");
-        binding.test.setVisibility(View.GONE);
         Intent intent = new Intent(this, BubbleService.class);
-        stopService(intent);
-        startService(intent);
+        intent.putExtra(CODE, resultCode);
+        intent.putExtra(DATA, data);
+        if (Build.VERSION.SDK_INT >= Q) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+
     }
 }

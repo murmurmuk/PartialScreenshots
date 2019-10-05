@@ -1,8 +1,12 @@
 package murmur.partialscreenshots;
 
 import android.annotation.SuppressLint;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
@@ -12,6 +16,8 @@ import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaScannerConnection;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
@@ -24,6 +30,8 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Toast;
 
+import androidx.core.app.NotificationCompat;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -35,15 +43,23 @@ import java.util.Locale;
 import io.reactivex.Single;
 import io.reactivex.SingleOnSubscribe;
 import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
 import murmur.partialscreenshots.databinding.BubbleLayoutBinding;
 import murmur.partialscreenshots.databinding.ClipLayoutBinding;
 import murmur.partialscreenshots.databinding.TrashLayoutBinding;
 
+import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Environment.DIRECTORY_PICTURES;
-import static murmur.partialscreenshots.MainActivity.sMediaProjection;
 
 public class BubbleService extends Service {
+    public static final String CODE = "code";
+    public static final String DATA = "data";
+
+    private static final String CHANNEL_ID = "5566";
+    private static final String NAME = "screenshot";
+    private static final int NOTIFICATION_ID = 5566;
+
     private WindowManager mWindowManager;
     private BubbleLayoutBinding mBubbleLayoutBinding;
     private WindowManager.LayoutParams mBubbleLayoutParams;
@@ -54,6 +70,9 @@ public class BubbleService extends Service {
     private boolean isClipMode;
     private ImageReader imageReader;
     private VirtualDisplay virtualDisplay;
+    private Disposable disposable;
+    private MediaProjection mediaProjection;
+
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -63,10 +82,40 @@ public class BubbleService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d("kanna","onStart");
-        if(sMediaProjection != null){
-            Log.d("kanna","mediaProjection alive");
+        if (mediaProjection == null) {
+            if (Build.VERSION.SDK_INT >= Q) {
+                NotificationChannel channel = new NotificationChannel(CHANNEL_ID, NAME,
+                        NotificationManager.IMPORTANCE_HIGH);
+                channel.setDescription(NAME);
+                NotificationManager notificationManager = getSystemService(NotificationManager.class);
+                if (notificationManager != null) {
+                    notificationManager.createNotificationChannel(channel);
+                }
+                NotificationCompat.Builder builder = new NotificationCompat
+                        .Builder(this, CHANNEL_ID)
+                        .setSmallIcon(R.drawable.ic_launcher_round)
+                        .setContentTitle(NAME)
+                        .setAutoCancel(true);
+                startForeground(NOTIFICATION_ID, builder.build(),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            }
+            MediaProjectionManager mediaProjectionManager = (MediaProjectionManager)
+                    getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            if (mediaProjectionManager != null) {
+                int code = intent.getIntExtra(CODE, 0);
+                Intent data = intent.getParcelableExtra(DATA);
+                if (data != null) {
+                    mediaProjection = mediaProjectionManager.getMediaProjection(code, data);
+                    initial();
+                }
+            } else {
+                Toast.makeText(this,
+                        "Initial fail.", Toast.LENGTH_LONG).show();
+            }
+        } else {
+            Toast.makeText(this,
+                    "Bubble already initial.", Toast.LENGTH_LONG).show();
         }
-        initial();
         return super.onStartCommand(intent, flags, startId);
     }
 
@@ -98,7 +147,7 @@ public class BubbleService extends Service {
 
     public void checkInCloseRegion(float x, float y) {
         if (closeRegion == null) {
-            int location[] = new int[2];
+            int[] location = new int[2];
             View v = mTrashLayoutBinding.getRoot();
             v.getLocationOnScreen(location);
             closeRegion = new int[]{location[0], location[1],
@@ -147,7 +196,7 @@ public class BubbleService extends Service {
     }
 
     public void screenshot(int[] clipRegion) {
-        if (sMediaProjection != null) {
+        if (mediaProjection != null) {
             shotScreen(clipRegion);
         } else {
             Toast.makeText(this,
@@ -158,7 +207,7 @@ public class BubbleService extends Service {
 
     @SuppressLint("CheckResult")
     private void shotScreen(int[] clipRegion) {
-        getScreenShot()
+        disposable = getScreenShot()
                 .subscribeOn(AndroidSchedulers.mainThread())
                 .observeOn(Schedulers.io())
                 .map(image -> createBitmap(image, clipRegion))
@@ -224,9 +273,12 @@ public class BubbleService extends Service {
             }
             mWindowManager = null;
         }
-        if (sMediaProjection != null) {
-            sMediaProjection.stop();
-            sMediaProjection = null;
+        if (mediaProjection != null) {
+            mediaProjection.stop();
+            mediaProjection = null;
+        }
+        if (disposable != null) {
+            disposable.dispose();
         }
         super.onDestroy();
     }
@@ -241,7 +293,6 @@ public class BubbleService extends Service {
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                     PixelFormat.TRANSPARENT);
         } else if(Build.VERSION.SDK_INT >= 23) {
-            //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.WRAP_CONTENT,
@@ -249,7 +300,6 @@ public class BubbleService extends Service {
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                     PixelFormat.TRANSPARENT);
         } else {
-            //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.WRAP_CONTENT,
@@ -266,7 +316,6 @@ public class BubbleService extends Service {
     private WindowManager.LayoutParams buildLayoutParamsForClip() {
         WindowManager.LayoutParams params;
         if (Build.VERSION.SDK_INT <= 22) {
-            //noinspection deprecation
             params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT,
@@ -312,7 +361,6 @@ public class BubbleService extends Service {
                                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                         PixelFormat.TRANSPARENT);
             } else {
-                //noinspection deprecation
                 params = new WindowManager.LayoutParams(
                         screenWidth,
                         screenHeight,
@@ -335,7 +383,8 @@ public class BubbleService extends Service {
         return Single.create(emitter -> {
             imageReader = ImageReader.newInstance(screenSize.x, screenSize.y,
                     PixelFormat.RGBA_8888, 2);
-            virtualDisplay = sMediaProjection.createVirtualDisplay("cap", screenSize.x, screenSize.y,
+            virtualDisplay = mediaProjection.createVirtualDisplay("cap",
+                    screenSize.x, screenSize.y,
                     metrics.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     imageReader.getSurface(), null, null);
             ImageReader.OnImageAvailableListener mImageListener =
