@@ -4,6 +4,8 @@ import android.annotation.SuppressLint;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -18,9 +20,11 @@ import android.media.ImageReader;
 import android.media.MediaScannerConnection;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
+import android.provider.MediaStore;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
@@ -30,11 +34,14 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Toast;
 
+import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -44,6 +51,7 @@ import io.reactivex.Single;
 import io.reactivex.SingleOnSubscribe;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.Disposable;
+import io.reactivex.functions.BiFunction;
 import io.reactivex.schedulers.Schedulers;
 import murmur.partialscreenshots.databinding.BubbleLayoutBinding;
 import murmur.partialscreenshots.databinding.ClipLayoutBinding;
@@ -58,6 +66,7 @@ public class BubbleService extends Service {
 
     private static final String CHANNEL_ID = "5566";
     private static final String NAME = "screenshot";
+    private static final String DIR_NAME = "screenshots";
     private static final int NOTIFICATION_ID = 5566;
 
     private WindowManager mWindowManager;
@@ -211,11 +220,7 @@ public class BubbleService extends Service {
                 .subscribeOn(AndroidSchedulers.mainThread())
                 .observeOn(Schedulers.io())
                 .map(image -> createBitmap(image, clipRegion))
-                .zipWith(createFile(), (bitmap, fileName) -> {
-                    writeFile(bitmap, fileName);
-                    return fileName;
-                })
-                .flatMap(this::updateScan)
+                .flatMap(this::writeToFile)
                 .observeOn(AndroidSchedulers.mainThread())
                 .doFinally(() -> {
                     Log.d("kanna", "do finally: " + Thread.currentThread().toString());
@@ -410,6 +415,18 @@ public class BubbleService extends Service {
         });
     }
 
+    private Single<String> writeToFile(Bitmap bitmap) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return writeFileAfterQ(bitmap);
+        } else {
+            return Single.zip(Single.create(emitter -> emitter.onSuccess(bitmap)),
+                    createFile(), (BiFunction<Bitmap, String, String>) (cutBitmap, fileName) -> {
+                        writeFileBeforeQ(bitmap, fileName);
+                        return fileName;
+                    }).flatMap(this::updateScan);
+        }
+    }
+
     private Single<String> updateScan(final String fileName) {
         return Single.create(emitter -> {
             String[] path = new String[]{fileName};
@@ -443,7 +460,44 @@ public class BubbleService extends Service {
         return bitmapCut;
     }
 
-    private void writeFile(Bitmap bitmap, String fileName) throws IOException {
+    @RequiresApi(Q)
+    private Single<String> writeFileAfterQ(Bitmap bitmap) {
+        Log.d("kanna", "check write file after Q: " + Thread.currentThread().toString());
+        return Single.create(emitter -> {
+            String name = createFileName();
+            ContentResolver contentResolver = getContentResolver();
+            ContentValues picContent = new ContentValues();
+            picContent.put(MediaStore.MediaColumns.RELATIVE_PATH,
+                    DIRECTORY_PICTURES + "/" + DIR_NAME);
+            picContent.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+            picContent.put(MediaStore.Images.Media.IS_PENDING, 1);
+            Uri collection = MediaStore.Images.Media
+                    .getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            Uri uri = contentResolver.insert(collection, picContent);
+            if (uri != null) {
+                try(OutputStream outputStream = contentResolver.openOutputStream(uri)) {
+                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, bos);
+                    byte[] data = bos.toByteArray();
+                    if (outputStream != null) {
+                        outputStream.write(data);
+                        outputStream.flush();
+                        picContent.put(MediaStore.Images.Media.IS_PENDING, 0);
+                        contentResolver.update(uri, picContent, null, null);
+                        emitter.onSuccess(name);
+                    } else {
+                        emitter.onError(new Throwable("no outputStream"));
+                    }
+                } catch (Exception e) {
+                    emitter.onError(new Throwable("insert file error " + e));
+                }
+            } else {
+                emitter.onError(new Throwable("insert file error with no uri"));
+            }
+        });
+    }
+
+    private void writeFileBeforeQ(Bitmap bitmap, String fileName) throws IOException {
         Log.d("kanna", "check write file: " + Thread.currentThread().toString());
         FileOutputStream fos = new FileOutputStream(fileName);
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
@@ -451,16 +505,22 @@ public class BubbleService extends Service {
         bitmap.recycle();
     }
 
+    private String createFileName() {
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd",
+                Locale.ENGLISH);
+        Calendar c = Calendar.getInstance();
+        return simpleDateFormat.format(c.getTime()) + "_" + System.currentTimeMillis() + ".png";
+    }
+
     private Single<String> createFile() {
         return Single.create((SingleOnSubscribe<String>) emitter -> {
             Log.d("kanna", "check create filename: " + Thread.currentThread().toString());
-            String directory, fileHead, fileName;
-            int count = 0;
+            String directory, fileName;
             File externalFilesDir = Environment.
                     getExternalStoragePublicDirectory(DIRECTORY_PICTURES);
             if (externalFilesDir != null) {
                 directory = Environment.getExternalStoragePublicDirectory(DIRECTORY_PICTURES)
-                        .getAbsolutePath() + "/screenshots/";
+                        .getAbsolutePath() + "/" + DIR_NAME + "/";
 
                 Log.d("kanna", directory);
                 File storeDirectory = new File(directory);
@@ -477,17 +537,7 @@ public class BubbleService extends Service {
                 return;
             }
 
-            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd",
-                    Locale.ENGLISH);
-            Calendar c = Calendar.getInstance();
-            fileHead = simpleDateFormat.format(c.getTime()) + "_";
-            fileName = directory + fileHead + count + ".png";
-            File storeFile = new File(fileName);
-            while (storeFile.exists()) {
-                count++;
-                fileName = directory + fileHead + count + ".png";
-                storeFile = new File(fileName);
-            }
+            fileName = directory + createFileName();
             emitter.onSuccess(fileName);
         }).subscribeOn(Schedulers.io());
     }
